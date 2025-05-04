@@ -1,104 +1,77 @@
 import os
 import cv2
-import numpy as np
-from datasets import load_dataset
-from tkinter import Tk, Button, Label, Entry, filedialog, messagebox
-import mediapipe as mp
-import pickle
+from tkinter import Tk, Button, Label, Entry, Listbox, messagebox
 
-class DatasetCreator:
+class DataCollector:
     def __init__(self, root):
         self.root = root
-        self.root.title("Dataset Creator")
-        self.dataset_path = ""
-        self.hf_dataset_name = ""
-        # MediaPipe qo'lni aniqlash uchun sozlamalar
-        self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+        self.root.title("Data Collector")
+        self.classes = []
+        self.dataset_size = 100
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            messagebox.showerror("Error", "Kamera ochilmadi!")
+            self.root.quit()
         self.setup_gui()
 
     def setup_gui(self):
-        Label(self.root, text="Hugging Face Dataset Name (e.g., sign_language_dataset):").pack()
-        self.hf_entry = Entry(self.root)
-        self.hf_entry.pack()
+        Label(self.root, text="Enter class name (e.g., A):").pack()
+        self.class_entry = Entry(self.root)
+        self.class_entry.pack()
+        Button(self.root, text="Add Class", command=self.add_class).pack()
 
-        Label(self.root, text="Local Image Folder (optional):").pack()
-        self.folder_entry = Entry(self.root)
-        self.folder_entry.pack()
-        Button(self.root, text="Browse Folder", command=self.browse_folder).pack()
+        self.class_list = Listbox(self.root)
+        self.class_list.pack()
 
-        Button(self.root, text="Create Dataset", command=self.create_dataset).pack()
+        Button(self.root, text="Start Collecting", command=self.start_collecting).pack()
+        Button(self.root, text="Finish", command=self.finish).pack()
 
-    def browse_folder(self):
-        folder = filedialog.askdirectory()
-        if folder:
-            self.folder_entry.delete(0, 'end')
-            self.folder_entry.insert(0, folder)
+    def add_class(self):
+        class_name = self.class_entry.get().strip()
+        if class_name and class_name not in self.classes:
+            self.classes.append(class_name)
+            self.class_list.insert("end", class_name)
+            self.class_entry.delete(0, "end")
+            with open("class_names.txt", "w") as f:
+                f.write("\n".join(self.classes))
 
-    def extract_landmarks(self, img):
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.hands.process(img_rgb)
-        if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                landmarks = []
-                for lm in hand_landmarks.landmark:
-                    landmarks.extend([lm.x, lm.y, lm.z])
-                return landmarks
-        return None
+    def start_collecting(self):
+        if not self.classes:
+            messagebox.showwarning("Warning", "Iltimos, kamida bitta sinf qo'shing!")
+            return
+        for idx, class_name in enumerate(self.classes):
+            if not os.path.exists(os.path.join("data", str(idx))):
+                os.makedirs(os.path.join("data", str(idx)))
+            print(f'Collecting data for class {class_name} (index {idx})')
+            self.collect_data(idx)
 
-    def create_dataset(self):
-        self.hf_dataset_name = self.hf_entry.get()
-        self.dataset_path = self.folder_entry.get()
-        output_dir = "sign_language_dataset"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+    def collect_data(self, class_idx):
+        counter = 0
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                break
+            cv2.putText(frame, 'Ready? Press "Q" ! :)', (100, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3, cv2.LINE_AA)
+            cv2.imshow('frame', frame)
+            if cv2.waitKey(25) == ord('q'):
+                break
 
-        data = []
-        labels = []
-        class_names = []
+        while counter < self.dataset_size:
+            ret, frame = self.cap.read()
+            if not ret:
+                break
+            cv2.imshow('frame', frame)
+            cv2.waitKey(25)
+            cv2.imwrite(os.path.join("data", str(class_idx), f'{counter}.jpg'), frame)
+            counter += 1
+        print(f'Collected {counter} images for class {class_idx}')
 
-        # Hugging Face datasetini yuklash
-        if self.hf_dataset_name:
-            try:
-                dataset = load_dataset(self.hf_dataset_name)
-                for split in dataset:
-                    for item in dataset[split]:
-                        image = np.array(item['image'])
-                        label = item['label']
-                        landmarks = self.extract_landmarks(image)
-                        if landmarks:
-                            data.append(landmarks)
-                            labels.append(label)
-                            if str(label) not in class_names:
-                                class_names.append(str(label))
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load Hugging Face dataset: {e}")
-
-        # Mahalliy suratlarni qayta ishlash
-        if self.dataset_path:
-            for label in os.listdir(self.dataset_path):
-                label_path = os.path.join(self.dataset_path, label)
-                if os.path.isdir(label_path):
-                    for img_name in os.listdir(label_path):
-                        img_path = os.path.join(label_path, img_name)
-                        img = cv2.imread(img_path)
-                        if img is not None:
-                            landmarks = self.extract_landmarks(img)
-                            if landmarks:
-                                data.append(landmarks)
-                                labels.append(label)
-                                if label not in class_names:
-                                    class_names.append(label)
-
-        # Ma'lumotlarni saqlash
-        with open(os.path.join(output_dir, "landmarks_data.pkl"), "wb") as f:
-            pickle.dump({"data": data, "labels": labels}, f)
-        with open(os.path.join(output_dir, "class_names.txt"), "w") as f:
-            f.write("\n".join(sorted(class_names)))
-
-        messagebox.showinfo("Success", f"Dataset created at {output_dir}")
+    def finish(self):
+        self.cap.release()
+        cv2.destroyAllWindows()
+        self.root.destroy()
 
 if __name__ == "__main__":
     root = Tk()
-    app = DatasetCreator(root)
+    app = DataCollector(root)
     root.mainloop()
