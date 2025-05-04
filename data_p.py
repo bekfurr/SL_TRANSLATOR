@@ -33,6 +33,8 @@ class DataProcessor:
             return
         data = []
         labels = []
+        with open("class_names.txt", "r") as f:
+            class_names = f.read().splitlines()
         for dir_ in os.listdir(self.dataset_path):
             for img_path in os.listdir(os.path.join(self.dataset_path, dir_)):
                 data_aux = []
@@ -59,7 +61,7 @@ class DataProcessor:
                         data.append(data_aux)
                         labels.append(int(dir_))
         with open('data.pickle', 'wb') as f:
-            pickle.dump({'data': data, 'labels': labels}, f)
+            pickle.dump({'data': data, 'labels': labels, 'class_names': class_names}, f)
         messagebox.showinfo("Success", "Data processed and saved as data.pickle")
 
 if __name__ == "__main__":
